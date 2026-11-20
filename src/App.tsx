@@ -48,6 +48,24 @@ interface Doc {
 
 let uid = 0;
 const mk = (cells: Cell[] = []): Line => ({ id: uid++, cells });
+
+const LS_KEY = 'tw_docs';
+
+interface SavedDoc {
+  id: string;
+  name: string;
+  savedAt: number;
+  lines: Line[];
+}
+
+function loadDocs(): SavedDoc[] {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) ?? '[]'); }
+  catch { return []; }
+}
+
+function persistDocs(docs: SavedDoc[]) {
+  localStorage.setItem(LS_KEY, JSON.stringify(docs));
+}
 const gap = (): Cell => ({ ch: " ", gap: true });
 const clamp = (v: number, lo: number, hi: number) =>
   Math.min(Math.max(v, lo), hi);
@@ -394,7 +412,12 @@ export default function App() {
   const [strike, setStrike] = useState(0);
   const [menu, setMenu] = useState(false);
   const [note, setNote] = useState("");
+  const [savedDocs, setSavedDocs] = useState<SavedDoc[]>(loadDocs);
+  const [docsPanel, setDocsPanel] = useState(false);
+  const [namePrompt, setNamePrompt] = useState<{ kind: 'save' | 'png' | 'docx'; draft: string } | null>(null);
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
   const noteTimer = useRef(0);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const caret = useRef<HTMLSpanElement>(null);
   const probe = useRef<HTMLSpanElement>(null);
@@ -495,19 +518,70 @@ export default function App() {
     clearTimeout(noteTimer.current);
     noteTimer.current = window.setTimeout(() => setNote(""), 2200);
   };
-  const runExport = async (kind: "png" | "docx") => {
+  const runExport = async (kind: "png" | "docx", name?: string) => {
     setMenu(false);
     input.current?.focus();
     try {
       const m = metrics.current;
       const ok =
         kind === "png"
-          ? await exportPng(doc.lines, { ...m, cols: cols.current })
-          : exportDocx(doc.lines, m.pitch / m.fs);
+          ? await exportPng(doc.lines, { ...m, cols: cols.current }, name)
+          : exportDocx(doc.lines, m.pitch / m.fs, name);
       if (!ok) flash("Nothing to export");
     } catch {
       flash("Export failed");
     }
+  };
+
+  const openName = (kind: 'save' | 'png' | 'docx') => {
+    setMenu(false);
+    setDocsPanel(false);
+    const draft = kind === 'save'
+      ? (savedDocs.find(d => d.id === currentDocId)?.name ?? '')
+      : '';
+    setNamePrompt({ kind, draft });
+  };
+
+  const confirmName = () => {
+    if (!namePrompt) return;
+    const name = namePrompt.draft.trim() || 'Untitled';
+    if (namePrompt.kind === 'save') {
+      const id = currentDocId ?? crypto.randomUUID();
+      const entry: SavedDoc = { id, name, savedAt: Date.now(), lines: doc.lines };
+      setSavedDocs(prev => {
+        const next = [entry, ...prev.filter(d => d.id !== id)];
+        persistDocs(next);
+        return next;
+      });
+      setCurrentDocId(id);
+      flash(`Saved "${name}"`);
+    } else {
+      void runExport(namePrompt.kind, name);
+    }
+    setNamePrompt(null);
+    input.current?.focus();
+  };
+
+  const loadDoc = (saved: SavedDoc) => {
+    const lines: Line[] = saved.lines.map(ln => ({
+      id: uid++,
+      cells: ln.cells,
+      ...(ln.soft !== undefined ? { soft: ln.soft } : {}),
+    }));
+    setDoc({ lines, row: 0, col: 0, anchor: null });
+    setCurrentDocId(saved.id);
+    setDocsPanel(false);
+    flash(`Opened "${saved.name}"`);
+    input.current?.focus();
+  };
+
+  const deleteDoc = (id: string) => {
+    setSavedDocs(prev => {
+      const next = prev.filter(d => d.id !== id);
+      persistDocs(next);
+      return next;
+    });
+    if (currentDocId === id) setCurrentDocId(null);
   };
   const onChange = (e: ChangeEvent<HTMLInputElement>) => {
     const el = e.target;
@@ -564,6 +638,8 @@ export default function App() {
     const mod = e.metaKey || e.ctrlKey;
     if (k === "Escape") {
       setMenu(false);
+      setDocsPanel(false);
+      setNamePrompt(null);
       return;
     }
     if (
@@ -595,7 +671,7 @@ export default function App() {
         edit(selectAll);
       } else if (l === "s") {
         e.preventDefault();
-        void runExport(e.shiftKey ? "docx" : "png");
+        openName(e.shiftKey ? "docx" : "png");
       }
       return; // c, x, v fall through to the clipboard events
     }
@@ -650,6 +726,7 @@ export default function App() {
   const onPointerDown = (e: PointerEvent<HTMLElement>) => {
     e.preventDefault();
     setMenu(false);
+    setDocsPanel(false);
     if (COARSE) {
       dragRef.current = { startY: e.clientY, startX: e.clientX, y: e.clientY, rowAccum: 0, moved: false };
       longPressTimerRef.current = window.setTimeout(() => longPress(e.clientX, e.clientY), 400);
@@ -765,6 +842,29 @@ export default function App() {
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
+        {namePrompt && (
+          <div className="name-dialog">
+            <span className="name-dialog__label">
+              {namePrompt.kind === 'save' ? 'Save to docs' : namePrompt.kind === 'png' ? 'Export PNG' : 'Export DOCX'}
+            </span>
+            <input
+              ref={nameInputRef}
+              className="name-dialog__input"
+              value={namePrompt.draft}
+              placeholder="Untitled"
+              autoFocus
+              onChange={(e) => setNamePrompt((p) => p ? { ...p, draft: e.target.value } : p)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); confirmName(); }
+                if (e.key === 'Escape') setNamePrompt(null);
+              }}
+            />
+            <div className="name-dialog__actions">
+              <button type="button" onClick={confirmName}>OK</button>
+              <button type="button" onClick={() => setNamePrompt(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
         <div className="export__bar">
           {note && (
             <span className="export__note" role="status">
@@ -774,27 +874,73 @@ export default function App() {
           <button
             type="button"
             aria-haspopup="menu"
+            aria-expanded={docsPanel}
+            onClick={() => { setDocsPanel((v) => !v); setMenu(false); }}
+          >
+            Docs{savedDocs.length > 0 ? ` (${savedDocs.length})` : ''}
+          </button>
+          <button
+            type="button"
+            aria-haspopup="menu"
             aria-expanded={menu}
-            onClick={() => setMenu((v) => !v)}
+            onClick={() => { setMenu((v) => !v); setDocsPanel(false); }}
           >
             Export
           </button>
         </div>
+        {docsPanel && (
+          <div className="docs-panel" role="menu">
+            {savedDocs.length === 0 ? (
+              <div className="docs-panel__empty">No saved docs</div>
+            ) : (
+              savedDocs.map((d) => (
+                <div key={d.id} className="docs-panel__item">
+                  <button
+                    type="button"
+                    className="docs-panel__open"
+                    role="menuitem"
+                    onClick={() => loadDoc(d)}
+                  >
+                    <span className="docs-panel__name">{d.name}</span>
+                    <span className="docs-panel__date">
+                      {new Date(d.savedAt).toLocaleDateString()}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="docs-panel__delete"
+                    aria-label={`Delete ${d.name}`}
+                    onClick={() => deleteDoc(d.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
         {menu && (
           <div className="export__menu" role="menu">
             <button
               type="button"
               role="menuitem"
-              onClick={() => void runExport("png")}
+              onClick={() => openName("png")}
             >
               Save as image (PNG)
             </button>
             <button
               type="button"
               role="menuitem"
-              onClick={() => void runExport("docx")}
+              onClick={() => openName("docx")}
             >
               Save as document (DOCX)
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => openName("save")}
+            >
+              Save to docs
             </button>
           </div>
         )}

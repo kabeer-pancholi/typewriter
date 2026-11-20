@@ -290,6 +290,136 @@ body {
   }
 }
 
+/* Name prompt dialog */
+.name-dialog {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5em;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  padding: 0.75em;
+  min-width: 16em;
+}
+
+.name-dialog__label {
+  opacity: 0.55;
+  font-size: 0.9em;
+}
+
+.name-dialog__input {
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--ink);
+  padding: 0.3em 0.5em;
+  outline: none;
+  width: 100%;
+}
+
+.name-dialog__input:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.name-dialog__actions {
+  display: flex;
+  gap: 0.5em;
+  justify-content: flex-end;
+}
+
+.name-dialog__actions button {
+  opacity: 1;
+  border: 1px solid var(--ink);
+  padding: 0.3em 0.8em;
+}
+
+@media (hover: hover) {
+  .name-dialog__actions button:hover {
+    background: var(--ink);
+    color: var(--paper);
+  }
+}
+
+/* Saved docs panel */
+.docs-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  max-height: 20em;
+  overflow-y: auto;
+  min-width: 16em;
+}
+
+.docs-panel__empty {
+  padding: 0.75em 0.9em;
+  opacity: 0.5;
+  white-space: nowrap;
+}
+
+.docs-panel__item {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 15%, transparent);
+}
+
+.docs-panel__item:last-child {
+  border-bottom: none;
+}
+
+.docs-panel__open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.5em 0.9em;
+  text-align: left;
+  gap: 0.1em;
+  opacity: 1;
+  white-space: nowrap;
+}
+
+.docs-panel__name {
+  font-weight: 500;
+}
+
+.docs-panel__date {
+  opacity: 0.45;
+  font-size: 0.85em;
+}
+
+.docs-panel__delete {
+  padding: 0.5em 0.75em;
+  opacity: 0.35;
+  font-size: 1.2em;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+@media (hover: hover) {
+  .docs-panel__open:hover {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .docs-panel__open:hover .docs-panel__date {
+    opacity: 0.65;
+  }
+
+  .docs-panel__delete:hover {
+    opacity: 1;
+  }
+}
+
+@media (pointer: coarse) {
+  .docs-panel__open,
+  .docs-panel__delete {
+    min-height: 44px;
+  }
+}
+
 /* Mobile format menu — appears above the current line when text is selected */
 .fmt-menu {
   position: absolute;

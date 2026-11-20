@@ -18,11 +18,11 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-function save(blob: Blob, ext: string) {
+function save(blob: Blob, ext: string, name?: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `typewriter-${stamp()}.${ext}`;
+  a.download = name ? `${name}.${ext}` : `typewriter-${stamp()}.${ext}`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -32,7 +32,7 @@ function save(blob: Blob, ext: string) {
 /* ------------------------------------------------------------------ PNG */
 
 /** Whole document as a PNG: same font, weights, size, pitch and margins as the screen; no rail, pointer or caret. */
-export async function exportPng(all: XLine[], m: XMetrics): Promise<boolean> {
+export async function exportPng(all: XLine[], m: XMetrics, name?: string): Promise<boolean> {
   const lines = trim(all);
   if (!lines.length) return false;
   const { cw, left: pad, fs, pitch, cols } = m;
@@ -94,7 +94,7 @@ export async function exportPng(all: XLine[], m: XMetrics): Promise<boolean> {
 
   const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
   if (!blob) return false;
-  save(blob, 'png');
+  save(blob, 'png', name);
   return true;
 }
 
@@ -132,7 +132,7 @@ function runs(cells: XCell[]) {
   return out;
 }
 
-export function exportDocx(all: XLine[], pitchK: number): boolean {
+export function exportDocx(all: XLine[], pitchK: number, name?: string): boolean {
   const lines = trim(all);
   if (!lines.length) return false;
 
@@ -175,7 +175,7 @@ export function exportDocx(all: XLine[], pitchK: number): boolean {
       '</w:font></w:fonts>'],
   ];
 
-  save(zip(files), 'docx');
+  save(zip(files), 'docx', name);
   return true;
 }
 
