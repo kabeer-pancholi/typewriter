@@ -4,6 +4,7 @@ import {
   CSSProperties,
   KeyboardEvent,
   PointerEvent,
+  RefObject,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -142,8 +143,6 @@ function insert(d: Doc, items: Item[], cols: number) {
       continue;
     }
     const line = d.lines[d.row];
-    const atEnd = d.col === line.cells.length;
-    if (!atEnd && line.cells.length >= cols) continue; // margin stop
     const cells = line.cells.slice();
     cells.splice(d.col, 0, it);
     d.col++;
@@ -167,6 +166,12 @@ function insert(d: Doc, items: Item[], cols: number) {
       d.col = Math.max(0, d.col - i - dropped.length);
     }
   }
+  // Reflow so any existing soft continuations are merged and re-wrapped correctly.
+  const r = reflow(d, cols);
+  d.lines = r.lines;
+  d.row = r.row;
+  d.col = r.col;
+  d.anchor = r.anchor;
 }
 
 function backspace(d: Doc) {
@@ -397,6 +402,9 @@ export default function App() {
   const cols = useRef(60);
   const metrics = useRef({ cw: 7.2, left: 0, fs: 12, pitch: 15 });
   const clip = useRef<{ text: string; items: Item[] } | null>(null);
+  const sheetRef = useRef<HTMLElement>(null);
+  const wheelAccum = useRef(0);
+  const dragRef = useRef<{ startY: number; y: number; rowAccum: number; moved: boolean } | null>(null);
 
   const edit = (fn: (d: Doc) => void) =>
     setDoc((p) => {
@@ -452,6 +460,26 @@ export default function App() {
     document.fonts.ready.then(measure);
     return () => removeEventListener("resize", measure);
   }, [measure]);
+
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const { pitch } = metrics.current;
+      wheelAccum.current += e.deltaY;
+      const steps = Math.trunc(wheelAccum.current / pitch);
+      if (!steps) return;
+      wheelAccum.current -= steps * pitch;
+      edit((d) => {
+        const n = Math.abs(steps);
+        const dir = steps > 0 ? "ArrowDown" : "ArrowUp";
+        for (let i = 0; i < n; i++) move(d, dir, false);
+      });
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
 
   const format = (key: "b" | "i" | "u") => {
     const hasSel =
@@ -583,16 +611,12 @@ export default function App() {
     }
   };
 
-  const onPointerDown = (e: PointerEvent<HTMLElement>) => {
-    e.preventDefault();
-    input.current?.focus();
-    setMenu(false);
+  const placeCursor = (clientX: number, clientY: number) => {
     const { cw: w, left, fs, pitch } = metrics.current;
-    // active row centre sits 7/6 em above the rail
     const railTop =
       rail.current?.getBoundingClientRect().top ?? innerHeight * 0.831;
-    const n = Math.round((railTop - (fs * 7) / 6 - e.clientY) / pitch);
-    const cx = e.clientX;
+    const n = Math.round((railTop - (fs * 7) / 6 - clientY) / pitch);
+    const cx = clientX;
     setDoc((p) => {
       const row = clamp(p.row - n, 0, p.lines.length - 1);
       const col = clamp(
@@ -604,6 +628,47 @@ export default function App() {
     });
   };
 
+  const onPointerDown = (e: PointerEvent<HTMLElement>) => {
+    e.preventDefault();
+    setMenu(false);
+    if (COARSE) {
+      dragRef.current = { startY: e.clientY, y: e.clientY, rowAccum: 0, moved: false };
+      return;
+    }
+    input.current?.focus();
+    placeCursor(e.clientX, e.clientY);
+  };
+
+  const onPointerMove = (e: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dy = drag.y - e.clientY;
+    drag.y = e.clientY;
+    if (Math.abs(e.clientY - drag.startY) > 4) drag.moved = true;
+    const { pitch } = metrics.current;
+    drag.rowAccum += dy;
+    const steps = Math.trunc(drag.rowAccum / pitch);
+    if (!steps) return;
+    drag.rowAccum -= steps * pitch;
+    edit((d) => {
+      const n = Math.abs(steps);
+      const dir = steps > 0 ? "ArrowDown" : "ArrowUp";
+      for (let i = 0; i < n; i++) move(d, dir, false);
+    });
+  };
+
+  const onPointerUp = (e: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag || drag.moved) return;
+    input.current?.focus();
+    placeCursor(e.clientX, e.clientY);
+  };
+
+  const onPointerCancel = () => {
+    dragRef.current = null;
+  };
+
   const { lines, row, col } = doc;
   const lo = Math.max(0, row - VISIBLE_LINES);
   const hi = Math.min(lines.length, row + VISIBLE_LINES + 1);
@@ -611,8 +676,12 @@ export default function App() {
 
   return (
     <main
+      ref={sheetRef as RefObject<HTMLElement>}
       className="sheet"
       onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onClick={() => input.current?.focus()}
     >
       <span ref={probe} className="probe" aria-hidden="true">
