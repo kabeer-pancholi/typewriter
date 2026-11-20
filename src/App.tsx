@@ -404,7 +404,10 @@ export default function App() {
   const clip = useRef<{ text: string; items: Item[] } | null>(null);
   const sheetRef = useRef<HTMLElement>(null);
   const wheelAccum = useRef(0);
-  const dragRef = useRef<{ startY: number; y: number; rowAccum: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ startY: number; startX: number; y: number; rowAccum: number; moved: boolean } | null>(null);
+  const longPressTimerRef = useRef<number>(0);
+  const longPressAnchorYRef = useRef<number>(0);
+  const mobileSelectingRef = useRef<boolean>(false);
 
   const edit = (fn: (d: Doc) => void) =>
     setDoc((p) => {
@@ -628,11 +631,28 @@ export default function App() {
     });
   };
 
+  const longPress = (clientX: number, clientY: number) => {
+    if (!dragRef.current) return;
+    const { cw: w, left, fs, pitch } = metrics.current;
+    const railTop = rail.current?.getBoundingClientRect().top ?? innerHeight * 0.831;
+    const n = Math.round((railTop - (fs * 7) / 6 - clientY) / pitch);
+    navigator.vibrate?.(10);
+    input.current?.focus();
+    mobileSelectingRef.current = true;
+    longPressAnchorYRef.current = clientY;
+    setDoc((p) => {
+      const row = clamp(p.row - n, 0, p.lines.length - 1);
+      const col = clamp(Math.round((clientX - left) / w), 0, p.lines[row].cells.length);
+      return { ...p, row, col, anchor: { row, col } };
+    });
+  };
+
   const onPointerDown = (e: PointerEvent<HTMLElement>) => {
     e.preventDefault();
     setMenu(false);
     if (COARSE) {
-      dragRef.current = { startY: e.clientY, y: e.clientY, rowAccum: 0, moved: false };
+      dragRef.current = { startY: e.clientY, startX: e.clientX, y: e.clientY, rowAccum: 0, moved: false };
+      longPressTimerRef.current = window.setTimeout(() => longPress(e.clientX, e.clientY), 400);
       return;
     }
     input.current?.focus();
@@ -642,9 +662,25 @@ export default function App() {
   const onPointerMove = (e: PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
+
+    if (mobileSelectingRef.current) {
+      const { cw: w, left, pitch } = metrics.current;
+      const rowDelta = Math.round((longPressAnchorYRef.current - e.clientY) / pitch);
+      setDoc((p) => {
+        if (!p.anchor) return p;
+        const row = clamp(p.anchor.row - rowDelta, 0, p.lines.length - 1);
+        const col = clamp(Math.round((e.clientX - left) / w), 0, p.lines[row].cells.length);
+        return { ...p, row, col };
+      });
+      return;
+    }
+
     const dy = drag.y - e.clientY;
     drag.y = e.clientY;
-    if (Math.abs(e.clientY - drag.startY) > 4) drag.moved = true;
+    if (Math.abs(e.clientY - drag.startY) > 4 || Math.abs(e.clientX - drag.startX) > 4) {
+      if (!drag.moved) clearTimeout(longPressTimerRef.current);
+      drag.moved = true;
+    }
     const { pitch } = metrics.current;
     drag.rowAccum += dy;
     const steps = Math.trunc(drag.rowAccum / pitch);
@@ -658,14 +694,21 @@ export default function App() {
   };
 
   const onPointerUp = (e: PointerEvent<HTMLElement>) => {
+    clearTimeout(longPressTimerRef.current);
     const drag = dragRef.current;
     dragRef.current = null;
+    if (mobileSelectingRef.current) {
+      mobileSelectingRef.current = false;
+      return;
+    }
     if (!drag || drag.moved) return;
     input.current?.focus();
     placeCursor(e.clientX, e.clientY);
   };
 
   const onPointerCancel = () => {
+    clearTimeout(longPressTimerRef.current);
+    mobileSelectingRef.current = false;
     dragRef.current = null;
   };
 
@@ -756,6 +799,19 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {COARSE && pick(doc) && (
+        <div
+          className="fmt-menu"
+          style={{ left: x }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" onClick={() => format('b')}><b>B</b></button>
+          <button type="button" onClick={() => format('i')}><i>I</i></button>
+          <button type="button" className="fmt-menu__u" onClick={() => format('u')}>U</button>
+        </div>
+      )}
 
       <LiquidGlassPointer x={x} strike={strike} w={pill.w} h={pill.h} />
 
